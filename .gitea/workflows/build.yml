@@ -1,0 +1,195 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        required: false
+        type: string
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Fix submodule URL
+      run: |
+        git config --global url."https://192.168.1.33/gitea/".insteadOf "https://192.168.1.33/gitea/"
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        submodules: 'recursive'
+        fetch-depth: '0'
+
+    - name: Download Android cmdline-tools
+      run: |
+        mkdir -p $HOME/sdk/cmdline-tools
+        cd /tmp
+        curl -fSL -o cmdline-tools.zip \
+          https://dl.google.com/android/repository/commandlinetools-linux-14742923_latest.zip
+        unzip -q cmdline-tools.zip -d $HOME/sdk/cmdline-tools
+        mv $HOME/sdk/cmdline-tools/cmdline-tools $HOME/sdk/cmdline-tools/latest
+        echo "ANDROID_HOME=$HOME/sdk" >> $GITEA_ENV
+        echo "$HOME/sdk/cmdline-tools/latest/bin" >> $GITEA_PATH
+        echo "$HOME/sdk/platform-tools" >> $GITEA_PATH
+
+    - name: Accept licenses & install SDK packages
+      env:
+        JAVA_TOOL_OPTIONS: "-DsocksProxyHost=xray -DsocksProxyPort=10808"
+      run: |
+        env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+            -u http_proxy -u https_proxy -u all_proxy \
+          bash -c 'yes | sdkmanager --licenses --verbose || test $? -eq 141'
+
+        env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+            -u http_proxy -u https_proxy -u all_proxy \
+          sdkmanager --verbose \
+            "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+
+    - name: Install NDK
+      env:
+        JAVA_TOOL_OPTIONS: "-DsocksProxyHost=xray -DsocksProxyPort=10808"
+      run: |
+        env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+            -u http_proxy -u https_proxy -u all_proxy \
+          sdkmanager --channel=0 --install "ndk;29.0.14206865"
+        echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> $GITEA_ENV
+        sed -i '10i\
+        \
+            ndkVersion = "29.0.14206865"' ${{ github.workspace }}/V2rayNG/app/build.gradle.kts
+
+    - name: Restore cached libhevtun
+      id: cache-libhevtun-restore
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ github.workspace }}/libs
+        key: libhevtun-${{ runner.os }}-${{ env.NDK_HOME }}-${{ hashFiles('.git/modules/hev-socks5-tunnel/HEAD') }}-${{ hashFiles('compile-hevtun.sh') }}
+
+    - name: Build libhevtun
+      if: steps.cache-libhevtun-restore.outputs.cache-hit != 'true'
+      run: |
+        bash compile-hevtun.sh
+
+    - name: Save libhevtun
+      if: steps.cache-libhevtun-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ github.workspace }}/libs
+        key: libhevtun-${{ runner.os }}-${{ env.NDK_HOME }}-${{ hashFiles('.git/modules/hev-socks5-tunnel/HEAD') }}-${{ hashFiles('compile-hevtun.sh') }}
+
+    - name: Copy libhevtun
+      run: |
+        cp -r ${{ github.workspace }}/libs ${{ github.workspace }}/V2rayNG/app
+
+    - name: Fetch AndroidLibXrayLite tag
+      run: |
+        pushd AndroidLibXrayLite
+        CURRENT_TAG=$(git describe --tags --abbrev=0)
+        echo "Current tag in this repo: $CURRENT_TAG"
+        echo "CURRENT_TAG=$CURRENT_TAG" >> $GITEA_ENV
+        popd
+
+    - name: Download libv2ray
+      env:
+        GITEA_URL: https://192.168.1.33/gitea
+        GITEA_OWNER: rkp
+        GITEA_REPO: AndroidLibXrayLite
+      run: |
+        mkdir -p V2rayNG/app/libs
+
+        ASSET_URL=$(curl -fsSL \
+          "${GITEA_URL}/api/v1/repos/${GITEA_OWNER}/${GITEA_REPO}/releases/tags/${CURRENT_TAG}" \
+          | jq -r '.assets[] | select(.name == "libv2ray.aar") | .browser_download_url')
+
+        if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" == "null" ]; then
+          echo "Asset libv2ray.aar not found in release ${CURRENT_TAG}"
+          exit 1
+        fi
+
+        curl -fsSL -o V2rayNG/app/libs/libv2ray.aar "${ASSET_URL}"
+
+    - name: Setup Java
+      uses: actions/setup-java@v6.0.0
+      with:
+        distribution: 'temurin'
+        java-version: '21'
+
+    - name: Decode Keystore
+      uses: actions/base64-to-file@v2.0.0
+      id: android_keystore
+      with:
+        fileName: "android_keystore.jks"
+        encodedString: ${{ secrets.APP_KEYSTORE_BASE64 }}
+
+    - name: Build APK
+      run: |
+        cd ${{ github.workspace }}/V2rayNG
+        echo "sdk.dir=${ANDROID_HOME}" > local.properties
+        chmod 755 gradlew
+        ./gradlew licenseFdroidReleaseReport
+        ./gradlew assembleRelease -Pandroid.injected.signing.store.file=${{ steps.android_keystore.outputs.filePath }} -Pandroid.injected.signing.store.password=${{ secrets.APP_KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.APP_KEYSTORE_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.APP_KEY_PASSWORD }}
+
+    - name: Upload arm64-v8a APK
+      uses: actions/upload-artifact@v7
+      if: ${{  success() }}
+      with:
+        name: arm64-v8a
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/release/*arm64-v8a*.apk
+
+    - name: Upload armeabi-v7a APK
+      uses: actions/upload-artifact@v7
+      if: ${{  success() }}
+      with:
+        name: armeabi-v7a
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/release/*armeabi-v7a*.apk
+
+    - name: Upload x86 APK
+      uses: actions/upload-artifact@v7
+      if: ${{  success() }}
+      with:
+        name: x86-apk
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/release/*x86*.apk
+
+    - name: Upload universal APK
+      uses: actions/upload-artifact@v7
+      if: ${{ success() }}
+      with:
+        name: universal-apk
+        path: ${{ github.workspace }}/V2rayNG/app/build/outputs/apk/*/release/*universal*.apk
+
+  sign-and-release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+
+    steps:
+      - name: Download APK artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release
+
+      - name: Sign APK files
+        run: |
+          printf '%s' "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          KEY=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')
+          mkdir -p release-files
+
+          find release -type f -name '*.apk' | while read apk; do
+            cp "$apk" release-files/
+            gpg --batch --yes --local-user "$KEY" --detach-sign --output "release-files/$(basename "$apk").sig" "$apk"
+          done
+
+          gpg --armor --export "$KEY" > release-files/v2rayN-public-key.asc
+
+      - name: Upload APKs, signatures and public key to release
+        uses: actions/gitea-release-action@v1
+        with:
+          files: |-
+            release-files/*
+          tag_name: ${{ inputs.release_tag }}
+          prerelease: true
