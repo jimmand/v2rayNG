@@ -93,12 +93,29 @@ data class V2rayConfig(
             var method: String? = null,
             /*Hysteria/Hysteria2*/
             var version: Int? = null,
-            /*Wireguard*/
+            /*Wireguard/Amnezia*/
             var secretKey: String? = null,
             val peers: List<WireGuardBean>? = null,
             var reserved: List<Int>? = null,
             var mtu: Int? = null,
             var domainStrategy: String? = null,
+            /*Amnezia*/
+            var jc: Int? = null,
+            var jMin: Int? = null,
+            var jMax: Int? = null,
+            var s1: Int? = null,
+            var s2: Int? = null,
+            var s3: Int? = null,
+            var s4: Int? = null,
+            var h1: String? = null,
+            var h2: String? = null,
+            var h3: String? = null,
+            var h4: String? = null,
+            var i1: String? = null,
+            var i2: String? = null,
+            var i3: String? = null,
+            var i4: String? = null,
+            var i5: String? = null,
         ) {
             data class WireGuardBean(
                 var publicKey: String = "",

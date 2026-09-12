@@ -30,6 +30,7 @@ object CoreOutboundBuilder {
             EConfigType.VLESS -> toOutboundVless(profileItem)
             EConfigType.TROJAN -> toOutboundTrojan(profileItem)
             EConfigType.WIREGUARD -> toOutboundWireguard(profileItem)
+            EConfigType.AMNEZIA -> toOutboundAmnezia(profileItem)
             EConfigType.HYSTERIA2 -> toOutboundHysteria2(profileItem)
             EConfigType.HTTP -> toOutboundHttp(profileItem)
             else -> null
@@ -93,6 +94,7 @@ object CoreOutboundBuilder {
                 streamSettings = OutboundBean.StreamSettingsBean()
             )
 
+            EConfigType.AMNEZIA,
             EConfigType.WIREGUARD -> OutboundBean(
                 protocol = configType.name.lowercase(),
                 settings = OutboundBean.OutSettingsBean(
@@ -235,9 +237,8 @@ object CoreOutboundBuilder {
         return outboundBean
     }
 
-    private fun toOutboundWireguard(profileItem: ProfileItem): OutboundBean? {
-        val outboundBean = createInitOutbound(EConfigType.WIREGUARD)
-
+    // Help function to not make double-init for Wireguard and Amnenzia same fields
+    private fun fillWireguardSettings(outboundBean: OutboundBean?, profileItem: ProfileItem): OutboundBean? {
         val rawAddresses = profileItem.localAddress
             ?.split(",")
             ?.map { it.trim() }
@@ -261,7 +262,8 @@ object CoreOutboundBuilder {
                 peer.endpoint = Utils.getIpv6Address(profileItem.server) + ":${profileItem.serverPort}"
             }
             wireguard.mtu = profileItem.mtu
-            wireguard.reserved = profileItem.reserved?.takeIf { it.isNotBlank() }?.split(",")?.filter { it.isNotBlank() }?.map { it.trim().toInt() }
+            wireguard.reserved = profileItem.reserved?.takeIf { it.isNotBlank() }
+                ?.split(",")?.filter { it.isNotBlank() }?.map { it.trim().toInt() }
         }
 
         if (!profileItem.finalMask.isNullOrBlank()) {
@@ -273,6 +275,37 @@ object CoreOutboundBuilder {
         }
         return outboundBean
     }
+
+    private fun toOutboundWireguard(profileItem: ProfileItem): OutboundBean? {
+        val outboundBean = createInitOutbound(EConfigType.WIREGUARD)
+        return fillWireguardSettings(outboundBean, profileItem)
+    }
+
+    private fun toOutboundAmnezia(profileItem: ProfileItem): OutboundBean? {
+        val wireguardPart = createInitOutbound(EConfigType.AMNEZIA)
+        val outboundBean = fillWireguardSettings(wireguardPart, profileItem)
+
+        outboundBean?.settings?.let { amnezia ->
+            amnezia.jc = profileItem.jc
+            amnezia.jMin = profileItem.jMin
+            amnezia.jMax = profileItem.jMax
+            amnezia.s1 = profileItem.s1
+            amnezia.s2 = profileItem.s2
+            amnezia.s3 = profileItem.s3
+            amnezia.s4 = profileItem.s4
+            amnezia.h1 = profileItem.h1
+            amnezia.h2 = profileItem.h2
+            amnezia.h3 = profileItem.h3
+            amnezia.h4 = profileItem.h4
+            amnezia.i1 = profileItem.i1
+            amnezia.i2 = profileItem.i2
+            amnezia.i3 = profileItem.i3
+            amnezia.i4 = profileItem.i4
+            amnezia.i5 = profileItem.i5
+        }
+        return outboundBean
+    }
+
 
     private fun toOutboundHysteria2(profileItem: ProfileItem): OutboundBean? {
         val outboundBean = createInitOutbound(EConfigType.HYSTERIA2) ?: return null

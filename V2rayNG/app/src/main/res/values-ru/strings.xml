@@ -41,6 +41,7 @@
     <string name="menu_item_import_config_manually_http">Добавить HTTP</string>
     <string name="menu_item_import_config_manually_trojan">Добавить Trojan</string>
     <string name="menu_item_import_config_manually_wireguard">Добавить WireGuard</string>
+    <string name="menu_item_import_config_manually_amnezia">Добавить Amnezia</string>
     <string name="menu_item_import_config_manually_hysteria2">Добавить Hysteria2</string>
     <string name="confirm_delete_visible_profiles">Удалить все отображаемые профили?</string>
     <string name="confirm_delete_duplicate_profiles">Удалить все отображаемые дубликаты профилей?</string>

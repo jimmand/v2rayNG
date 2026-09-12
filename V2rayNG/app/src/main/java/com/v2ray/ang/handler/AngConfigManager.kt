@@ -12,6 +12,7 @@ import com.v2ray.ang.dto.entities.SubscriptionCache
 import com.v2ray.ang.dto.entities.SubscriptionItem
 import com.v2ray.ang.enums.EConfigType
 import com.v2ray.ang.extension.isNotNullEmpty
+import com.v2ray.ang.fmt.AmneziaFmt
 import com.v2ray.ang.fmt.CustomFmt
 import com.v2ray.ang.fmt.Hysteria2Fmt
 import com.v2ray.ang.fmt.ShadowsocksFmt
@@ -27,6 +28,39 @@ import com.v2ray.ang.util.LogUtil
 import com.v2ray.ang.util.QRCodeDecoder
 import com.v2ray.ang.util.Utils
 import java.net.URI
+
+object WireguardConfigDetector {
+
+    private val AMNEZIA_MARKER_KEYS = setOf(
+        "jc", "jmin", "jmax",
+        "s1", "s2", "s3", "s4",
+        "h1", "h2", "h3", "h4",
+        "i1", "i2", "i3", "i4", "i5",
+        "j1", "j2", "j3"
+    )
+
+    /**
+     * check type of configuration: Amnezia/Wireguard
+     */
+    fun isAmneziaConfig(content: String): Boolean {
+        val interfaceKeys = mutableSetOf<String>()
+        var insideInterface = false
+
+        content.lines().forEach { rawLine ->
+            val line = rawLine.trim()
+            when {
+                line.equals("[Interface]", ignoreCase = true) -> insideInterface = true
+                line.startsWith("[") -> insideInterface = false
+                insideInterface && line.contains("=") -> {
+                    val key = line.substringBefore("=").trim().lowercase()
+                    interfaceKeys.add(key)
+                }
+            }
+        }
+
+        return interfaceKeys.any { it in AMNEZIA_MARKER_KEYS }
+    }
+}
 
 object AngConfigManager {
 
@@ -46,6 +80,7 @@ object AngConfigManager {
             EConfigType.TROJAN.protocolScheme to TrojanFmt::parse,
             EConfigType.VLESS.protocolScheme to VlessFmt::parse,
             EConfigType.WIREGUARD.protocolScheme to WireguardFmt::parse,
+            EConfigType.AMNEZIA.protocolScheme to AmneziaFmt::parse,
             EConfigType.HYSTERIA2.protocolScheme to Hysteria2Fmt::parse,
             AppConfig.HY2 to Hysteria2Fmt::parse,
         )
@@ -162,6 +197,7 @@ object AngConfigManager {
                 EConfigType.VLESS -> VlessFmt.toUri(config)
                 EConfigType.TROJAN -> TrojanFmt.toUri(config)
                 EConfigType.WIREGUARD -> WireguardFmt.toUri(config)
+                EConfigType.AMNEZIA -> AmneziaFmt.toUri(config)
                 EConfigType.HYSTERIA2 -> Hysteria2Fmt.toUri(config)
                 else -> {}
             }
@@ -371,7 +407,11 @@ object AngConfigManager {
             return 0
         } else if (server.startsWith("[Interface]") && server.contains("[Peer]")) {
             try {
-                val config = WireguardFmt.parseWireguardConfFile(server)
+                val config = if (WireguardConfigDetector.isAmneziaConfig(server)) {
+                    AmneziaFmt.parseAmneziaConfFile(server)
+                } else {
+                    WireguardFmt.parseWireguardConfFile(server)
+                }
                 config.subscriptionId = subid
                 config.description = generateDescription(config)
                 commitProfiles(
@@ -383,7 +423,7 @@ object AngConfigManager {
             } catch (e: ProfileStorageException) {
                 throw e
             } catch (e: Exception) {
-                LogUtil.e(AppConfig.TAG, "Failed to parse WireGuard config file", e)
+                LogUtil.e(AppConfig.TAG, "Failed to parse WireGuard/Amnezia config file", e)
             }
             return 0
         } else {
