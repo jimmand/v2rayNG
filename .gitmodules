@@ -1,6 +1,6 @@
 [submodule "AndroidLibXrayLite"]
 	path = AndroidLibXrayLite
-	url = https://192.168.1.33/gitea/rkp/AndroidLibXrayLite.git
+	url = https://github.com/jimmand/AndroidLibXrayLite-awg
 [submodule "hev-socks5-tunnel"]
 	path = hev-socks5-tunnel
 	url = https://github.com/heiher/hev-socks5-tunnel
